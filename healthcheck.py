@@ -10,10 +10,14 @@ import sqlite3
 import emoji
 from datetime import datetime
 from pytz import timezone
+import os
+import sys
+import psutil
 
 count_sim = ''
 count_nao = ''
 
+BOT_ADMIN = ''
 
 BASE_NAME = 'banco.healthcheck.db'
 def insert(tab,user_id, chat_id,message_id,timestamp):
@@ -98,20 +102,35 @@ def getUserResult(timestamp):
 def getEmojiResult(qtd):
 	txtReturn = ''
 	if(qtd == 4): 
-		txtReturn = emoji.emojize(":heart:",use_aliases=True)
+		txtReturn = emoji.emojize(":heart:", use_aliases=True)
 	elif(qtd == 3): 	
-		txtReturn = emoji.emojize(":expressionless:",use_aliases=True)
+		txtReturn = emoji.emojize(":expressionless:", use_aliases=True)
 	elif(qtd == 2): 
-		txtReturn = emoji.emojize(":pensive:",use_aliases=True)
+		txtReturn = emoji.emojize(":pensive:", use_aliases=True)
 	elif(qtd == 1): 
-		txtReturn = emoji.emojize(":face_with_head-bandage:",use_aliases=True)
+		txtReturn = emoji.emojize(":face_with_head-bandage:", use_aliases=True)
 	elif(qtd == 0): 
-		txtReturn = emoji.emojize(":skull_and_crossbones:",use_aliases=True)
+		txtReturn = emoji.emojize(":skull_and_crossbones:", use_aliases=True)
 	return txtReturn
 
 def handle(msg):
 	content_type, chat_type, chat_id = telepot.glance(msg)
 	#print(msg)
+
+	#Privado
+	if chat_type == 'private':
+		if msg['from']['username'] == BOT_ADMIN:
+			if 'text' in msg:
+				if msg['text'] == '/restart':
+					try:
+						p = psutil.Process(os.getpid())
+						for handler in p.open_files() + p.connections():
+							os.close(handler.fd)
+						python = sys.executable
+						os.execl(python, python, *sys.argv)
+					except Exception as e:
+						print("Erro ao reiniciar processo")
+					
 
 	data = datetime.now(timezone('Brazil/East')).strftime('%Y%m%d')
 
@@ -146,7 +165,7 @@ def handle(msg):
 		bot.sendMessage(chat_id, "Escolha a data para o resultado:",reply_markup=keybResult)'''
 		stamps = getTimes("pergunta")
 		if(len(stamps) == 0):
-			bot.sendMessage(chat_id,"Nenhuma pergunta foi feita ainda. Envie /saude antes")
+			bot.sendMessage(chat_id,"Nenhuma pergunta foi feita ainda. Envie /check antes")
 		else:
 			dataRecuperada = datetime.strptime(stamps[0][0], "%Y%m%d")
 			
@@ -161,21 +180,23 @@ def handle(msg):
 				for result in resultados:
 					user_id = result[0]
 					count_sim = result[1]
+					count_nao = result[2]
 					user = bot.getChatMember(chat_id,user_id)
 
 					if not flPrintPergunta:
 						msg_result = msg_result + dataRecuperada.strftime("%d/%m/%Y") + '\n\n'
 						msg_result = msg_result + "Resultado Healthcheck: " + ' \n'
-						msg_result = msg_result + emoji.emojize(":heart:",use_aliases=True)+ " - 4 sim / 0 não " + ' \n'
-						msg_result = msg_result + emoji.emojize(":expressionless:",use_aliases=True)+ " - 3 sim / 1 não " + ' \n'
-						msg_result = msg_result + emoji.emojize(":pensive:",use_aliases=True)+ " - 2 sim / 2 não " + ' \n'
-						msg_result = msg_result + emoji.emojize(":face_with_head-bandage:",use_aliases=True)+ " - 1 sim / 3 não " + ' \n'
-						msg_result = msg_result + emoji.emojize(":skull_and_crossbones:",use_aliases=True)+ " - 0 sim / 4 não " + ' \n'
+						msg_result = msg_result + getEmojiResult(4)+ " - 4 sim / 0 nao " + ' \n'
+						msg_result = msg_result + getEmojiResult(3)+ " - 3 sim / 1 nao " + ' \n'
+						msg_result = msg_result + getEmojiResult(2)+ " - 2 sim / 2 nao " + ' \n'
+						msg_result = msg_result + getEmojiResult(1)+ " - 1 sim / 3 nao " + ' \n'
+						msg_result = msg_result + getEmojiResult(0)+ " - 0 sim / 4 nao " + ' \n'
 
 						flPrintPergunta = True
 
 					if(id_usuario_anterior != user_id):
-						msg_result = msg_result + '\n' + user['user']['first_name'] + ' ('+user['user']['username']+') :  ' + getEmojiResult(count_sim) 
+						if(count_sim != 0) or (count_nao != 0):
+							msg_result = msg_result + '\n' + user['user']['first_name'] + ' ('+user['user']['username']+') :  ' + getEmojiResult(count_sim) 
 					id_usuario_anterior = user_id
 				
 				bot.sendMessage(chat_id,msg_result)
@@ -244,11 +265,11 @@ def callback(msg):
 
 
 
-bot = telepot.Bot(TOKEN) #healthcheck
+bot = telepot.Bot('') #healthcheck
 MessageLoop(bot, {'chat':handle,
 				  'callback_query':callback}).run_as_thread()
 
-print ('I am listening ...')
+print ('Executando HealthCheck...')
 
 while 1:
 	time.sleep(10)
