@@ -27,11 +27,11 @@ def insert(tab,user_id, chat_id,message_id,timestamp):
 		cursor.execute(sql,[(chat_id),(user_id),(message_id),(timestamp)])
 		con.commit()
 
-def insertQuestion(id,perg,timestamp):
+def insertQuestion(id,perg,timestamp,chat_id):
 	with sqlite3.connect(BASE_NAME) as con:
 		cursor = con.cursor()
 		sql = 'INSERT INTO pergunta values (?,?,?,?)'
-		cursor.execute(sql,[(0),(id),(perg),(timestamp)])
+		cursor.execute(sql,[(chat_id),(id),(perg),(timestamp)])
 		con.commit()
 
 def delete(tab,user_id, chat_id,message_id,timestamp):
@@ -54,51 +54,47 @@ def count(tab,user_id, chat_id,message_id):
 		data = cursor.fetchone()
 		return int(data[0])
 
-def getTimes(tab):
+def getTimes(chat_id):
 	with sqlite3.connect(BASE_NAME) as con:
 		cursor = con.cursor()
-		sql = 'SELECT distinct timestamp FROM ' + tab + ' ORDER BY timestamp DESC'
+		sql = 'SELECT distinct timestamp FROM pergunta where user_id = '+ str(chat_id) +' ORDER BY timestamp DESC'
 		cursor.execute(sql)
 		data = cursor.fetchmany(7)
 		return data
 
-def getResult(timestamp):
-	with sqlite3.connect(BASE_NAME) as con:
-		cursor = con.cursor()
-		sql = '''select * from (
-		select sim.user_id,sim.message_id, pergunta.question, "Sim" as Resposta, sim."timestamp" from sim
-		inner join pergunta on sim."timestamp" == pergunta."timestamp" and sim.message_id == pergunta.message_id
-		UNION
-		select nao.user_id,nao.message_id, pergunta.question, "Não"  as Resposta, nao."timestamp" from nao
-		inner join pergunta on nao."timestamp" == pergunta."timestamp" and nao.message_id == pergunta.message_id
-		) where "timestamp" = '''  + timestamp + '''
-		order by user_id,message_id'''
-		cursor.execute(sql)
-		data = cursor.fetchall()
-		return data
-
-def getUserResult(timestamp):
+def getUserResult(timestamp,chat_id):
 	with sqlite3.connect(BASE_NAME) as con:
 		cursor = con.cursor()
 		sql = ''' 
 		select users.user_id, coalesce(s.qtd,0) as qtd_sim, COALESCE(n.qtd,0) as qtd_nao
 		from 
-			(SELECT DISTINCT user_id from (SELECT DISTINCT user_id from sim union SELECT DISTINCT user_id from nao)) as users
+			(SELECT DISTINCT user_id from (SELECT DISTINCT user_id from sim where chat_id = ''' + str(chat_id) + ''' 
+											union 
+											SELECT DISTINCT user_id from nao where chat_id = ''' + str(chat_id) + ''')) as users
 		left outer join
 			(select sim.user_id, count(*) as qtd from sim
-			inner join pergunta on sim."timestamp" == pergunta."timestamp"	and sim.message_id == pergunta.message_id
-			where sim."timestamp" = '''+ timestamp +'''
+			inner join pergunta on sim."timestamp" == pergunta."timestamp"	and sim.message_id == pergunta.message_id and sim.chat_id == pergunta.user_id
+			where sim."timestamp" = '''+ timestamp +''' and chat_id = ''' + str(chat_id) + '''
 			group by sim.user_id, sim."timestamp") as s on users.user_id = s.user_id
 		left outer join
 			(select nao.user_id, count(*) as qtd from nao
-			inner join pergunta on nao."timestamp" == pergunta."timestamp"	and nao.message_id == pergunta.message_id
-			where nao."timestamp" = '''+ timestamp +'''
+			inner join pergunta on nao."timestamp" == pergunta."timestamp"	and nao.message_id == pergunta.message_id and nao.chat_id == pergunta.user_id
+			where nao."timestamp" = '''+ timestamp +''' and chat_id = ''' + str(chat_id) + '''
 			group by nao.user_id, nao."timestamp") as n on users.user_id = n.user_id'''
 		cursor.execute(sql)
 		data = cursor.fetchall()
+		#print(data)
 		return data
 
-		
+def getChats():
+	with sqlite3.connect(BASE_NAME) as con:
+		cursor = con.cursor()
+		sql = 'SELECT distinct user_id FROM pergunta '
+		cursor.execute(sql)
+		data = cursor.fetchall()
+		#print(data)
+		return data
+
 def getEmojiResult(qtd):
 	txtReturn = ''
 	if(qtd == 4): 
@@ -112,6 +108,68 @@ def getEmojiResult(qtd):
 	elif(qtd == 0): 
 		txtReturn = emoji.emojize(":skull_and_crossbones:", use_aliases=True)
 	return txtReturn
+
+def EnviaPerguntas(chat_id):
+	data = datetime.now(timezone('Brazil/East')).strftime('%Y%m%d')
+
+	keybVoto = InlineKeyboardMarkup(inline_keyboard=[[
+			InlineKeyboardButton(text="Sim", callback_data=data+'|sim'),
+			InlineKeyboardButton(text="Não", callback_data=data+'|nao'),
+	]])
+
+	stamps = getTimes(chat_id)
+	send_question = True if (len(stamps) == 0) else True if (str(data) not in stamps[0]) else False
+	if (send_question):
+		enviada = bot.sendMessage(chat_id,"Você dormiu mais de 6 horas por noite a cada dia nessa semana?",reply_markup=keybVoto)
+		insertQuestion(enviada['message_id'],enviada['text'],data,chat_id)
+		enviada = bot.sendMessage(chat_id,"Você praticou alguma atividade física em ao menos 1 dia essa semana?",reply_markup=keybVoto)
+		insertQuestion(enviada['message_id'],enviada['text'],data,chat_id)
+		enviada = bot.sendMessage(chat_id,"Você fez algo que te dá muito prazer, fora trabalho, em ao menos um dia essa semana?",reply_markup=keybVoto)
+		insertQuestion(enviada['message_id'],enviada['text'],data,chat_id)
+		enviada = bot.sendMessage(chat_id,"Você teve algum momento de autocuidado (relacionado à auto estima, beleza etc) em ao menos um dia essa semana?",reply_markup=keybVoto)
+		insertQuestion(enviada['message_id'],enviada['text'],data,chat_id)
+	else:
+		bot.sendMessage(chat_id,"Já foi enviada uma enquete hoje")
+
+def CarregaRespostas(chat_id):
+	stamps = getTimes(chat_id)
+	if(len(stamps) == 0):
+		bot.sendMessage(chat_id,"Nenhuma pergunta foi feita ainda. Envie /check antes")
+	else:
+		dataRecuperada = datetime.strptime(stamps[0][0], "%Y%m%d")
+		
+		resultados = getUserResult(stamps[0][0],chat_id)
+		if(len(resultados) == 0):
+			bot.sendMessage(chat_id,"Sem respostas até o momento!")
+		else:
+			#print(resultados)
+			id_usuario_anterior = 0
+			msg_result = ''
+			flPrintPergunta = False
+			for result in resultados:
+				user_id = result[0]
+				count_sim = result[1]
+				count_nao = result[2]
+				user = bot.getChatMember(chat_id,user_id)
+
+				if not flPrintPergunta:
+					msg_result = msg_result + dataRecuperada.strftime("%d/%m/%Y") + '\n\n'
+					msg_result = msg_result + "Resultado Healthcheck: " + ' \n'
+					msg_result = msg_result + getEmojiResult(4)+ " - 4 sim / 0 nao " + ' \n'
+					msg_result = msg_result + getEmojiResult(3)+ " - 3 sim / 1 nao " + ' \n'
+					msg_result = msg_result + getEmojiResult(2)+ " - 2 sim / 2 nao " + ' \n'
+					msg_result = msg_result + getEmojiResult(1)+ " - 1 sim / 3 nao " + ' \n'
+					msg_result = msg_result + getEmojiResult(0)+ " - 0 sim / 4 nao " + ' \n'
+
+					flPrintPergunta = True
+
+				if(id_usuario_anterior != user_id):
+					if(count_sim != 0) or (count_nao != 0):
+						msg_result = msg_result + '\n' + user['user']['first_name'] + ' ('+user['user']['username']+') :  ' + getEmojiResult(count_sim) 
+				id_usuario_anterior = user_id
+			
+			bot.sendMessage(chat_id,msg_result)
+
 
 def handle(msg):
 	content_type, chat_type, chat_id = telepot.glance(msg)
@@ -130,76 +188,13 @@ def handle(msg):
 						os.execl(python, python, *sys.argv)
 					except Exception as e:
 						print("Erro ao reiniciar processo")
-					
-
-	data = datetime.now(timezone('Brazil/East')).strftime('%Y%m%d')
-
-	keybVoto = InlineKeyboardMarkup(inline_keyboard=[[
-					InlineKeyboardButton(text="Sim", callback_data=data+'|sim'),
-					InlineKeyboardButton(text="Não", callback_data=data+'|nao'),
-	]])
+	
 
 	if '/check' in msg['text']:
-		stamps = getTimes("pergunta")
-		send_question = True if (len(stamps) == 0) else True if (str(data) not in stamps[0]) else False
-		if (send_question):
-			enviada = bot.sendMessage(chat_id,"Você dormiu mais de 6 horas por noite a cada dia nessa semana?",reply_markup=keybVoto)
-			insertQuestion(enviada['message_id'],enviada['text'],data)
-			enviada = bot.sendMessage(chat_id,"Você praticou alguma atividade física em ao menos 1 dia essa semana?",reply_markup=keybVoto)
-			insertQuestion(enviada['message_id'],enviada['text'],data)
-			enviada = bot.sendMessage(chat_id,"Você fez algo que te dá muito prazer, fora trabalho, em ao menos um dia essa semana?",reply_markup=keybVoto)
-			insertQuestion(enviada['message_id'],enviada['text'],data)
-			enviada = bot.sendMessage(chat_id,"Você teve algum momento de autocuidado (relacionado à auto estima, beleza etc) em ao menos um dia essa semana?",reply_markup=keybVoto)
-			insertQuestion(enviada['message_id'],enviada['text'],data)
-		else:
-			bot.sendMessage(chat_id,"Já foi enviada uma enquete hoje")
+		EnviaPerguntas(chat_id)
 
-	if '/result' in msg['text'] :
-		'''	keyboard = []
-		stamps = getTimes("pergunta")
-		for s in stamps:
-			dataRecuperada = datetime.strptime(s[0], "%Y%m%d")
-
-			keyboard = keyboard + [[InlineKeyboardButton(text=dataRecuperada.strftime("%d/%m/%Y"), callback_data=s[0]+"|result")]]
-		keybResult = InlineKeyboardMarkup(inline_keyboard=keyboard)
-		bot.sendMessage(chat_id, "Escolha a data para o resultado:",reply_markup=keybResult)'''
-		stamps = getTimes("pergunta")
-		if(len(stamps) == 0):
-			bot.sendMessage(chat_id,"Nenhuma pergunta foi feita ainda. Envie /check antes")
-		else:
-			dataRecuperada = datetime.strptime(stamps[0][0], "%Y%m%d")
-			
-			resultados = getUserResult(stamps[0][0])
-			if(len(resultados) == 0):
-				bot.sendMessage(chat_id,"Sem respostas até o momento!")
-			else:
-				#print(resultados)
-				id_usuario_anterior = 0
-				msg_result = ''
-				flPrintPergunta = False
-				for result in resultados:
-					user_id = result[0]
-					count_sim = result[1]
-					count_nao = result[2]
-					user = bot.getChatMember(chat_id,user_id)
-
-					if not flPrintPergunta:
-						msg_result = msg_result + dataRecuperada.strftime("%d/%m/%Y") + '\n\n'
-						msg_result = msg_result + "Resultado Healthcheck: " + ' \n'
-						msg_result = msg_result + getEmojiResult(4)+ " - 4 sim / 0 nao " + ' \n'
-						msg_result = msg_result + getEmojiResult(3)+ " - 3 sim / 1 nao " + ' \n'
-						msg_result = msg_result + getEmojiResult(2)+ " - 2 sim / 2 nao " + ' \n'
-						msg_result = msg_result + getEmojiResult(1)+ " - 1 sim / 3 nao " + ' \n'
-						msg_result = msg_result + getEmojiResult(0)+ " - 0 sim / 4 nao " + ' \n'
-
-						flPrintPergunta = True
-
-					if(id_usuario_anterior != user_id):
-						if(count_sim != 0) or (count_nao != 0):
-							msg_result = msg_result + '\n' + user['user']['first_name'] + ' ('+user['user']['username']+') :  ' + getEmojiResult(count_sim) 
-					id_usuario_anterior = user_id
-				
-				bot.sendMessage(chat_id,msg_result)
+	if '/result' in msg['text']:
+		CarregaRespostas(chat_id)
 	
 	
 
@@ -222,7 +217,7 @@ def callback(msg):
 				refreshButton = True
 			else:
 				bot.answerCallbackQuery(query_id,"Você já votou nessa opção!")
-				#delete('sim',from_id, chat_id,message_id,timestamp)
+
 		if data[1] == 'nao':
 			if count('nao',from_id, chat_id,message_id) == 0:
 				delete('sim',from_id, chat_id,message_id,timestamp)
@@ -231,8 +226,6 @@ def callback(msg):
 				refreshButton = True
 			else:
 				bot.answerCallbackQuery(query_id,"Você já votou nessa opção!")
-				#delete('nao',from_id, chat_id,message_id,timestamp)
-
 		
 		count_sim = count('sim',None, chat_id,message_id)
 		count_nao = count('nao',None, chat_id,message_id)
@@ -245,33 +238,37 @@ def callback(msg):
 		if(refreshButton):
 			bot.editMessageReplyMarkup(ident_mensagem, reply_markup=keybVoto)
 
-	'''if data[1] == 'result':
-		resultados = getResult(timestamp)
-		print(resultados)
-		id_usuario_anterior = 0
-		msg_result = ''
-		for result in resultados:
-			user_id = result[0]
-			text = result[2]
-			resp = result[3]
-			user = bot.getChatMember(chat_id,user_id)
+	
+bot = telepot.Bot('') #healthcheck 
+if len(sys.argv) > 1:
+	if(sys.argv[1]) == 'Pergunta':
+		for chat_id in getChats():
+			try:
+				#print(chat_id[0])
+				bot.sendChatAction(chat_id[0],'typing')
+			except:
+				print(chat_id[0] + " indisponível")
+				pass
+			else:
+				EnviaPerguntas(chat_id[0])
+				print("Mensagem Enviada via Cron")
+	elif (sys.argv[1]) == 'Resposta':
+		for chat_id in getChats():
+			try:
+				#print(chat_id[0])
+				bot.sendChatAction(chat_id[0],'typing')
+			except:
+				print(chat_id[0] + " indisponível")
+				pass
+			else:
+				CarregaRespostas(chat_id[0])
+else:
+	MessageLoop(bot, {'chat':handle,
+					'callback_query':callback}).run_as_thread()
 
-			if(id_usuario_anterior != user_id):
-				msg_result = msg_result + '\n*' + user['user']['first_name'] + ' ('+user['user']['username']+')*\n'
-			msg_result = msg_result + '      '+text + ' _' + resp +'_\n'
-			id_usuario_anterior = user_id
-		
-		bot.sendMessage(chat_id,msg_result,parse_mode="Markdown")'''
+	print ('Executando HealthCheck...')
 
-
-
-bot = telepot.Bot('') #healthcheck
-MessageLoop(bot, {'chat':handle,
-				  'callback_query':callback}).run_as_thread()
-
-print ('Executando HealthCheck...')
-
-while 1:
-	time.sleep(10)
+	while 1:
+		time.sleep(10)
 
 
