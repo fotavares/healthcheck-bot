@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 import requests
 import json
-import telepot
-from telepot.loop import MessageLoop
-from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
+import amanobot
+from amanobot.loop import MessageLoop
+from amanobot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
 import constants
 import time
 import sqlite3
@@ -18,6 +18,7 @@ count_sim = ''
 count_nao = ''
 
 BOT_ADMIN = ''
+TOKEN = ''
 
 BASE_NAME = 'banco.healthcheck.db'
 def insert(tab,user_id, chat_id,message_id,timestamp):
@@ -150,7 +151,10 @@ def CarregaRespostas(chat_id):
 				user_id = result[0]
 				count_sim = result[1]
 				count_nao = result[2]
-				user = bot.getChatMember(chat_id,user_id)
+				try:
+					user = bot.getChatMember(chat_id,user_id)
+				except:
+					pass
 
 				if not flPrintPergunta:
 					msg_result = msg_result + dataRecuperada.strftime("%d/%m/%Y") + '\n\n'
@@ -172,8 +176,8 @@ def CarregaRespostas(chat_id):
 
 
 def handle(msg):
-	content_type, chat_type, chat_id = telepot.glance(msg)
-	#print(msg)
+	content_type, chat_type, chat_id = amanobot.glance(msg)
+	print(msg)
 
 	#Privado
 	if chat_type == 'private':
@@ -186,20 +190,20 @@ def handle(msg):
 							os.close(handler.fd)
 						python = sys.executable
 						os.execl(python, python, *sys.argv)
-					except Exception as e:
+					except Exception:
 						print("Erro ao reiniciar processo")
 	
+	if content_type == 'text':
+		if '/check' in msg['text']:
+			EnviaPerguntas(chat_id)
 
-	if '/check' in msg['text']:
-		EnviaPerguntas(chat_id)
-
-	if '/result' in msg['text']:
-		CarregaRespostas(chat_id)
+		if '/result' in msg['text']:
+			CarregaRespostas(chat_id)
 	
 	
 
 def callback(msg):
-	query_id, from_id, query_data = telepot.glance(msg, flavor='callback_query')
+	query_id, from_id, query_data = amanobot.glance(msg, flavor='callback_query')
 	#print(msg)
 	message_id = msg['message']['message_id']
 	chat_id = msg['message']['chat']['id']
@@ -239,7 +243,7 @@ def callback(msg):
 			bot.editMessageReplyMarkup(ident_mensagem, reply_markup=keybVoto)
 
 	
-bot = telepot.Bot('') #healthcheck 
+bot = amanobot.Bot(TOKEN) #healthcheck 
 if len(sys.argv) > 1:
 	if(sys.argv[1]) == 'Pergunta':
 		for chat_id in getChats():
@@ -247,7 +251,7 @@ if len(sys.argv) > 1:
 				#print(chat_id[0])
 				bot.sendChatAction(chat_id[0],'typing')
 			except:
-				print(chat_id[0] + " indisponível")
+				print(chat_id[0] + " indisponvel")
 				pass
 			else:
 				EnviaPerguntas(chat_id[0])
@@ -258,7 +262,7 @@ if len(sys.argv) > 1:
 				#print(chat_id[0])
 				bot.sendChatAction(chat_id[0],'typing')
 			except:
-				print(chat_id[0] + " indisponível")
+				print(chat_id[0] + " indisponvel")
 				pass
 			else:
 				CarregaRespostas(chat_id[0])
@@ -266,7 +270,7 @@ else:
 	MessageLoop(bot, {'chat':handle,
 					'callback_query':callback}).run_as_thread()
 
-	print ('Executando HealthCheck...')
+#	print ('Executando HealthCheck...')
 
 	while 1:
 		time.sleep(10)
